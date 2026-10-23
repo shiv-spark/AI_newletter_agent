@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+pydantic-settings
+python-dotenv
+pytest
+feedparser
+requests
+trafilatura
+lxml_html_clean
+googlenewsdecoder==0.1.7
+selectolax==0.3.21
+APScheduler
+alembic
