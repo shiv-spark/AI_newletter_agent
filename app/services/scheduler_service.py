@@ -10,7 +10,7 @@ from app.config import settings
 from app.database.db import SessionLocal
 from app.database.models import User
 from app.services.delivery_service import send_newsletter
-from app.services.newsletter_service import generate_newsletter_draft
+from app.services.editorial_service import generate_editorial_issue
 from app.services.user_research import run_user_research
 
 logger = logging.getLogger(__name__)
@@ -84,18 +84,21 @@ def is_user_due(user, now: datetime | None = None) -> bool:
 
 
 def run_newsletter_for_user(user_id: int, send_emails: bool) -> str:
-    """Research, write a draft and (optionally) send it. Returns a status."""
+    """Research, run the editorial pipeline and (optionally) send.
+
+    Only an issue the Editor approved is ever sent. Returns a status.
+    """
     run_user_research(user_id)
 
-    draft = generate_newsletter_draft(user_id)
+    issue = generate_editorial_issue(user_id)
 
-    if draft["status"] != "draft_created":
-        return draft["status"]
+    if issue["status"] != "approved":
+        return issue["status"]
 
     if not send_emails:
-        return "draft_created"
+        return "approved"
 
-    return send_newsletter(draft["issue_id"])["status"]
+    return send_newsletter(issue["issue_id"])["status"]
 
 
 def scheduled_newsletter_run() -> None:

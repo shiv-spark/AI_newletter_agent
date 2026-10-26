@@ -196,13 +196,13 @@ def test_weekly_user_without_day_defaults_to_monday():
     assert scheduler_service.is_user_due(user, FRIDAY_MORNING) is False
 
 
-def test_run_for_user_creates_draft_without_sending_when_sending_is_off():
+def test_run_for_user_approves_without_sending_when_sending_is_off():
     with (
         patch.object(scheduler_service, "run_user_research") as research,
         patch.object(
             scheduler_service,
-            "generate_newsletter_draft",
-            return_value={"status": "draft_created", "issue_id": 7},
+            "generate_editorial_issue",
+            return_value={"status": "approved", "issue_id": 7},
         ),
         patch.object(scheduler_service, "send_newsletter") as send,
     ):
@@ -210,7 +210,7 @@ def test_run_for_user_creates_draft_without_sending_when_sending_is_off():
 
     research.assert_called_once_with(1)
     send.assert_not_called()
-    assert status == "draft_created"
+    assert status == "approved"
 
 
 def test_run_for_user_sends_when_sending_is_on():
@@ -218,8 +218,8 @@ def test_run_for_user_sends_when_sending_is_on():
         patch.object(scheduler_service, "run_user_research"),
         patch.object(
             scheduler_service,
-            "generate_newsletter_draft",
-            return_value={"status": "draft_created", "issue_id": 7},
+            "generate_editorial_issue",
+            return_value={"status": "approved", "issue_id": 7},
         ),
         patch.object(
             scheduler_service,
@@ -233,12 +233,12 @@ def test_run_for_user_sends_when_sending_is_on():
     assert status == "sent"
 
 
-def test_run_for_user_does_not_send_when_there_is_no_draft():
+def test_run_for_user_does_not_send_when_the_issue_is_not_approved():
     with (
         patch.object(scheduler_service, "run_user_research"),
         patch.object(
             scheduler_service,
-            "generate_newsletter_draft",
+            "generate_editorial_issue",
             return_value={"status": "no_new_articles"},
         ),
         patch.object(scheduler_service, "send_newsletter") as send,
@@ -334,3 +334,18 @@ def test_automatic_job_is_added_only_when_enabled():
     job_ids = [call.kwargs["id"] for call in mock_scheduler.add_job.call_args_list]
 
     assert job_ids == ["newsletter_safe_check", "newsletter_auto_run"]
+
+def test_issue_that_needs_review_is_never_sent():
+    with (
+        patch.object(scheduler_service, "run_user_research"),
+        patch.object(
+            scheduler_service,
+            "generate_editorial_issue",
+            return_value={"status": "needs_review", "issue_id": 7},
+        ),
+        patch.object(scheduler_service, "send_newsletter") as send,
+    ):
+        status = scheduler_service.run_newsletter_for_user(1, True)
+
+    send.assert_not_called()
+    assert status == "needs_review"

@@ -1,4 +1,3 @@
-
 import uuid
 from unittest.mock import patch
 
@@ -69,6 +68,8 @@ def select_issue_ids(user_id):
 def test_draft_excludes_articles_already_sent_to_user():
     email = f"newsletter-test-{uuid.uuid4().hex}@example.com"
     unique_id = uuid.uuid4().hex
+    # A unique made-up topic, so real articles in the database cannot match.
+    topic = f"zq{unique_id[:8]}"
     user_id = None
     article_ids = []
 
@@ -79,24 +80,24 @@ def test_draft_excludes_articles_already_sent_to_user():
             session.flush()
             user_id = user.id
 
-            session.add(UserTopic(user_id=user_id, topic="AI"))
+            session.add(UserTopic(user_id=user_id, topic=topic))
 
             sent_article = Article(
-                title=f"AI story already sent {unique_id}",
+                title=f"Story already sent {topic}",
                 url=f"https://example.com/sent-{unique_id}",
                 canonical_url=f"https://example.com/sent-{unique_id}",
                 source_name="Example News",
                 content_hash=f"sent-{unique_id}",
-                summary="An AI story that was already sent.",
+                summary=f"An already sent story about {topic}.",
             )
 
             new_article = Article(
-                title=f"AI story not sent {unique_id}",
+                title=f"Story not sent {topic}",
                 url=f"https://example.com/new-{unique_id}",
                 canonical_url=f"https://example.com/new-{unique_id}",
                 source_name="Example News",
                 content_hash=f"new-{unique_id}",
-                summary="A new AI story for the newsletter.",
+                summary=f"A new story about {topic} for the newsletter.",
             )
 
             session.add_all([sent_article, new_article])

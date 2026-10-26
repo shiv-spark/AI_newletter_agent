@@ -13,8 +13,12 @@ from app.database.models import (
 from app.services.delivery_service import send_newsletter
 
 
-def create_test_draft():
-    """Create a unique user, article, and newsletter draft in PostgreSQL."""
+def create_test_draft(status="approved"):
+    """Create a unique user, article, and newsletter issue in PostgreSQL.
+
+    Issues are "approved" by default, because only approved issues can
+    be sent. The name is kept for the existing tests.
+    """
     unique_id = uuid.uuid4().hex
 
     with SessionLocal() as session:
@@ -37,7 +41,8 @@ def create_test_draft():
             user_id=user.id,
             subject="Delivery test newsletter",
             body="This is a test newsletter.",
-            status="draft",
+            html_body="<p>This is a test newsletter.</p>",
+            status=status,
         )
         session.add(issue)
         session.flush()
@@ -192,7 +197,7 @@ def test_article_already_sent_in_another_issue_is_rejected():
                 user_id=test_data["user_id"],
                 subject="Duplicate newsletter",
                 body="This contains an already-sent article.",
-                status="draft",
+                status="approved",
             )
             session.add(duplicate_issue)
             session.flush()
@@ -255,7 +260,7 @@ def test_inactive_user_is_not_sent_newsletter():
             issue = session.get(
                 NewsletterIssue, test_data["issue_id"]
             )
-            assert issue.status == "draft"
+            assert issue.status == "approved"
 
     finally:
         cleanup_test_data(test_data)
@@ -285,7 +290,7 @@ def test_newsletter_without_articles_is_not_sent():
             issue = session.get(
                 NewsletterIssue, test_data["issue_id"]
             )
-            assert issue.status == "draft"
+            assert issue.status == "approved"
 
     finally:
         cleanup_test_data(test_data)
@@ -335,6 +340,71 @@ def test_issue_already_being_sent_is_not_sent_again():
         assert result["status"] == "not_sendable"
         assert result["current_status"] == "sending"
         mock_send.assert_not_called()
+
+    finally:
+        cleanup_test_data(test_data)
+
+
+def test_only_approved_issues_are_sent():
+    for status in ("draft", "needs_review", "rejected", "send_failed"):
+        test_data = create_test_draft(status=status)
+
+        try:
+            with patch(
+                "app.services.delivery_service.send_email"
+            ) as mock_send:
+                result = send_newsletter(test_data["issue_id"])
+
+            assert result["status"] == "not_sendable"
+            assert result["current_status"] == status
+            mock_send.assert_not_called()
+
+            with SessionLocal() as session:
+                issue = session.get(
+                    NewsletterIssue, test_data["issue_id"]
+                )
+                assert issue.status == status
+
+        finally:
+            cleanup_test_data(test_data)
+
+
+def test_html_and_plain_text_are_both_sent():
+    test_data = create_test_draft()
+
+    try:
+        with patch(
+            "app.services.delivery_service.send_email",
+            return_value={"success": True, "message_id": "m-1"},
+        ) as mock_send:
+            send_newsletter(test_data["issue_id"])
+
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs["body"] == "This is a test newsletter."
+        assert kwargs["html"] == "<p>This is a test newsletter.</p>"
+        assert kwargs["subject"] == "Delivery test newsletter"
+
+    finally:
+        cleanup_test_data(test_data)
+
+
+def test_issue_without_html_is_sent_as_plain_text_only():
+    test_data = create_test_draft()
+
+    try:
+        with SessionLocal() as session:
+            issue = session.get(NewsletterIssue, test_data["issue_id"])
+            issue.html_body = None
+            session.commit()
+
+        with patch(
+            "app.services.delivery_service.send_email",
+            return_value={"success": True, "message_id": "m-2"},
+        ) as mock_send:
+            result = send_newsletter(test_data["issue_id"])
+
+        assert result["status"] == "sent"
+        assert mock_send.call_args.kwargs["html"] is None
 
     finally:
         cleanup_test_data(test_data)

@@ -13,6 +13,7 @@ from app.agents.research import (
 
 def test_build_feed_url():
     url = build_feed_url("Data Engineering")
+    print(url)
 
     assert url.startswith("https://news.google.com/rss/search?")
     assert "Data" in url

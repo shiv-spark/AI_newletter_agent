@@ -62,7 +62,7 @@ def save_articles(articles: list[dict]) -> dict:
                 published_at=item.get("published_at"),
                 content_hash=content_hash,
                 summary=summary or None,
-                
+                content=content,
             )
 
             session.add(article)

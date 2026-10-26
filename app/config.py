@@ -16,11 +16,30 @@ class Settings(BaseSettings):
     resend_from_email: str = ""
     scheduler_enabled: bool = False
     scheduler_send_enabled: bool = False
+
+    # Editorial pipeline (Curator -> Analyst -> Writer -> Editor).
+    # Empty editor model means "use openrouter_model".
+    openrouter_editor_model: str = ""
+    max_correction_attempts: int = 2
+    curator_min_stories: int = 3
+    curator_max_stories: int = 5
+    curator_candidate_limit: int = 20
+    # Comma-separated publisher names, for example "Reuters,BBC News".
+    trusted_sources: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def trusted_sources_list(self) -> list[str]:
+        return [
+            name.strip()
+            for name in self.trusted_sources.split(",")
+            if name.strip()
+        ]
 
     @property
     def database_url(self) -> str:

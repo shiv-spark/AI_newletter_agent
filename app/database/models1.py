@@ -1,13 +1,15 @@
 
-from datetime import datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
     String,
     Text,
+    Time,
     UniqueConstraint,
     func,
 )
@@ -33,6 +35,24 @@ class User(Base):
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
+    )
+    preferred_time: Mapped[time] = mapped_column(
+        Time,
+        default=time(8, 0),
+        server_default="08:00:00",
+        nullable=False,
+    )
+    preferred_day: Mapped[str | None] = mapped_column(
+        String(10), nullable=True
+    )
+    timezone: Mapped[str] = mapped_column(
+        String(50),
+        default="Asia/Kolkata",
+        server_default="Asia/Kolkata",
+        nullable=False,
+    )
+    last_run_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

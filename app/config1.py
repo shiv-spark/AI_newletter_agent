@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     openrouter_model: str = "nvidia/nemotron-3.5-super-vl:free"
     resend_api_key: str = ""
     resend_from_email: str = ""
+    scheduler_enabled: bool = False
+    scheduler_send_enabled: bool = False
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
