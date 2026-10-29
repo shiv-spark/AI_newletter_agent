@@ -16,6 +16,22 @@ class Settings(BaseSettings):
     resend_from_email: str = ""
     scheduler_enabled: bool = False
     scheduler_send_enabled: bool = False
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/0"
+    base_url: str = "http://localhost:8000"
+
+    # Web API. When API_KEY is set, every /api request must send it in the
+    # X-API-Key header (or the api_key query parameter). Empty = open API,
+    # which is fine on your own computer but not on a public server.
+    api_key: str = ""
+
+    # Look of the HTML newsletter: "forest" (dark green) or "light".
+    newsletter_theme: str = "forest"
+
+    # Name shown as sender, in the subject and in the email header/footer.
+    newsletter_brand: str = "Sparkbrains"
+    # The Writer's title must be short; longer ones are repaired or cut.
+    newsletter_title_max_chars: int = 55
 
     # Editorial pipeline (Curator -> Analyst -> Writer -> Editor).
     # Empty editor model means "use openrouter_model".

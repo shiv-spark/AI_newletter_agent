@@ -1,6 +1,7 @@
 import requests
 
 from app.config import settings
+from app.services.branding import branded_subject, sender_address
 
 
 RESEND_API_URL = "https://api.resend.com/emails"
@@ -40,9 +41,9 @@ def send_email(
     }
 
     payload = {
-        "from": settings.resend_from_email,
+        "from": sender_address(settings.resend_from_email),
         "to": [to_email.strip()],
-        "subject": subject.strip(),
+        "subject": branded_subject(subject),
         "text": body,
     }
 
@@ -65,7 +66,10 @@ def send_email(
     if not response.ok:
         return {
             "success": False,
-            "error": f"Resend API returned HTTP {response.status_code}.",
+            "error": (
+                f"Resend API returned HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            ),
         }
 
     try:

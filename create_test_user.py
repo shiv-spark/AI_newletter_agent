@@ -65,7 +65,9 @@ def main() -> None:
     print(f"Topics:         {preferences['topics']}")
     print(f"Preferred time: {preferences['preferred_time']} ({TIMEZONE})")
     print()
-    print("Next: start the app with   python -m uvicorn app.main:app")
+    print("Next: start Redis, then in two separate terminals run:")
+    print("  celery -A app.celery_app worker --loglevel=info --pool=solo")
+    print("  celery -A app.celery_app beat --loglevel=info")
     print("and wait until that time. Then run: python check_test_user.py", email)
 
 

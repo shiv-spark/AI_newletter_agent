@@ -11,6 +11,9 @@ trafilatura
 lxml_html_clean
 googlenewsdecoder==0.1.7
 selectolax==0.3.29
-APScheduler
 alembic
 pydantic
+httpx
+celery
+redis
+

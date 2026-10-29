@@ -3,6 +3,7 @@
 Every agent returns one of these models, so a malformed LLM answer fails
 validation instead of silently flowing into the next stage.
 """
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -131,9 +132,48 @@ class EditorIssue(BaseModel):
     correction: str = Field(min_length=1)
 
 
+_NO_PROBLEM = re.compile(
+    r"^\s*(no (problems?|issues?|errors?)( (was |were )?found)?|none|n/?a)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+DEFAULT_CORRECTION = "Fix this problem using only facts from the source text."
+
+
 class EditorVerdict(BaseModel):
     status: Literal["approved", "rejected", "needs_review"]
     issues: list[EditorIssue] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tidy_issues(cls, data):
+        """Weak models sometimes list "No problems found." as an issue, or
+        forget the correction text. A plain "no problem" entry is dropped.
+        A real problem without a correction is KEPT (so it still blocks
+        approval) and gets a generic correction.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("issues"), list):
+            return data
+
+        tidy = []
+
+        for item in data["issues"]:
+            if not isinstance(item, dict):
+                tidy.append(item)
+                continue
+
+            problem = str(item.get("problem") or "")
+            correction = str(item.get("correction") or "").strip()
+
+            if not correction:
+                if _NO_PROBLEM.match(problem):
+                    continue
+
+                item = {**item, "correction": DEFAULT_CORRECTION}
+
+            tidy.append(item)
+
+        return {**data, "issues": tidy}
 
     @model_validator(mode="after")
     def _rejection_needs_issues(self):

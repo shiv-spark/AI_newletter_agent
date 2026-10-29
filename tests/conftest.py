@@ -22,6 +22,14 @@ import pytest  # noqa: E402
 from psycopg import sql  # noqa: E402
 
 from app.config import settings  # noqa: E402
+from app.celery_app import celery_app  # noqa: E402
+
+celery_app.conf.update(
+    task_always_eager=True,
+    task_eager_propagates=True,
+    task_store_eager_result=True,
+    result_backend="cache+memory://",
+)
 
 
 def _create_database_if_missing() -> None:

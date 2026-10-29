@@ -11,124 +11,6 @@ from app.database.models import User
 from app.services import scheduler_service
 
 
-def test_start_scheduler_adds_safe_job():
-    mock_scheduler = MagicMock()
-    mock_scheduler.running = False
-
-    with (
-        patch.object(scheduler_service, "scheduler", mock_scheduler),
-        patch.object(scheduler_service.settings, "scheduler_enabled", False),
-    ):
-        scheduler_service.start_scheduler()
-
-    mock_scheduler.add_job.assert_called_once()
-    mock_scheduler.start.assert_called_once()
-
-    args, kwargs = mock_scheduler.add_job.call_args
-    assert args[0] is scheduler_service.scheduled_newsletter_check
-    assert kwargs["id"] == "newsletter_safe_check"
-    assert kwargs["minutes"] == 1
-
-
-def test_start_scheduler_does_not_start_twice():
-    mock_scheduler = MagicMock()
-    mock_scheduler.running = True
-
-    with patch.object(scheduler_service, "scheduler", mock_scheduler):
-        scheduler_service.start_scheduler()
-
-    mock_scheduler.add_job.assert_not_called()
-    mock_scheduler.start.assert_not_called()
-
-
-def test_stop_scheduler_when_running():
-    mock_scheduler = MagicMock()
-    mock_scheduler.running = True
-
-    with patch.object(scheduler_service, "scheduler", mock_scheduler):
-        scheduler_service.stop_scheduler()
-
-    mock_scheduler.shutdown.assert_called_once_with(wait=False)
-
-
-def test_stop_scheduler_when_not_running():
-    mock_scheduler = MagicMock()
-    mock_scheduler.running = False
-
-    with patch.object(scheduler_service, "scheduler", mock_scheduler):
-        scheduler_service.stop_scheduler()
-
-    mock_scheduler.shutdown.assert_not_called()
-
-
-def test_safe_job_counts_active_users_by_frequency():
-    daily_user = MagicMock()
-    daily_user.frequency = "daily"
-
-    weekly_user = MagicMock()
-    weekly_user.frequency = "weekly"
-
-    another_daily_user = MagicMock()
-    another_daily_user.frequency = "daily"
-
-    mock_session = MagicMock()
-    mock_session.scalars.return_value.all.return_value = [
-        daily_user,
-        weekly_user,
-        another_daily_user,
-    ]
-
-    with (
-        patch.object(scheduler_service, "SessionLocal", return_value=mock_session),
-        patch.object(scheduler_service, "logger") as mock_logger,
-    ):
-        scheduler_service.scheduled_newsletter_check()
-
-    mock_session.scalars.assert_called_once()
-    mock_session.close.assert_called_once()
-
-    mock_logger.info.assert_called_once()
-    log_args = mock_logger.info.call_args.args
-
-    assert log_args[1] == 3
-    assert log_args[2] == 2
-    assert log_args[3] == 1
-    assert log_args[4] == {}
-
-
-def test_safe_job_handles_no_active_users():
-    mock_session = MagicMock()
-    mock_session.scalars.return_value.all.return_value = []
-
-    with (
-        patch.object(scheduler_service, "SessionLocal", return_value=mock_session),
-        patch.object(scheduler_service, "logger") as mock_logger,
-    ):
-        scheduler_service.scheduled_newsletter_check()
-
-    mock_logger.info.assert_called_once()
-    log_args = mock_logger.info.call_args.args
-
-    assert log_args[1] == 0
-    assert log_args[2] == 0
-    assert log_args[3] == 0
-    assert log_args[4] == {}
-
-
-def test_safe_job_handles_database_error():
-    mock_session = MagicMock()
-    mock_session.scalars.side_effect = Exception("Database unavailable")
-
-    with (
-        patch.object(scheduler_service, "SessionLocal", return_value=mock_session),
-        patch.object(scheduler_service, "logger") as mock_logger,
-    ):
-        scheduler_service.scheduled_newsletter_check()
-
-    mock_logger.exception.assert_called_once()
-    mock_session.close.assert_called_once()
-
-
 def make_user(**overrides):
     values = {
         "frequency": "daily",
@@ -321,20 +203,6 @@ def test_one_failing_user_does_not_stop_the_scheduled_run():
             session.commit()
 
 
-def test_automatic_job_is_added_only_when_enabled():
-    mock_scheduler = MagicMock()
-    mock_scheduler.running = False
-
-    with (
-        patch.object(scheduler_service, "scheduler", mock_scheduler),
-        patch.object(scheduler_service.settings, "scheduler_enabled", True),
-    ):
-        scheduler_service.start_scheduler()
-
-    job_ids = [call.kwargs["id"] for call in mock_scheduler.add_job.call_args_list]
-
-    assert job_ids == ["newsletter_safe_check", "newsletter_auto_run"]
-
 def test_issue_that_needs_review_is_never_sent():
     with (
         patch.object(scheduler_service, "run_user_research"),
@@ -349,3 +217,44 @@ def test_issue_that_needs_review_is_never_sent():
 
     send.assert_not_called()
     assert status == "needs_review"
+
+
+def test_failed_dispatch_does_not_mark_the_user_as_done_today():
+    with SessionLocal() as session:
+        user = User(email=f"sched-{uuid.uuid4().hex}@example.com")
+        session.add(user)
+        session.commit()
+        user_id = user.id
+
+    try:
+        with (
+            patch.object(
+                scheduler_service,
+                "is_user_due",
+                side_effect=lambda user, now: user.id == user_id,
+            ),
+            patch.object(
+                scheduler_service.run_newsletter_for_user_task,
+                "delay",
+                side_effect=ConnectionError("redis down"),
+            ),
+        ):
+            scheduler_service.scheduled_newsletter_run()
+
+        with SessionLocal() as session:
+            assert session.get(User, user_id).last_run_date is None
+
+    finally:
+        with SessionLocal() as session:
+            session.execute(delete(User).where(User.id == user_id))
+            session.commit()
+
+
+def test_task_reraises_so_failures_are_visible():
+    import pytest
+
+    with patch.object(
+        scheduler_service, "run_newsletter_for_user", side_effect=RuntimeError("boom")
+    ):
+        with pytest.raises(RuntimeError):
+            scheduler_service.run_newsletter_for_user_task(1, True)

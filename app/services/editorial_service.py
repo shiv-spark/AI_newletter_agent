@@ -28,8 +28,9 @@ from app.database.models import (
     User,
     UserTopic,
 )
+from app.services.token_service import generate_user_token
 from app.services.html_renderer import build_render_items, render_newsletter
-from app.services.newsletter_service import build_topic_pattern
+from app.services.topic_matching import build_topic_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -220,8 +221,14 @@ def generate_editorial_issue(user_id: int) -> dict:
     # issues too.
     if review.stories:
         items = build_render_items(review.stories, sources)
+        unsub_token = generate_user_token(user_id)
+        unsub_url = f"{settings.base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
         html_body, plain_text = render_newsletter(
-            review.subject, big_picture, items, language
+            review.subject,
+            big_picture,
+            items,
+            language,
+            unsubscribe_url=unsub_url,
         )
         fields["html_body"] = html_body
         fields["body"] = plain_text

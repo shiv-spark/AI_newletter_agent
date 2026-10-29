@@ -327,6 +327,42 @@ def _extract_json(raw: str) -> str:
     return text
 
 
+def parse_json_object(raw: str):
+    """Parse the JSON object in a model answer, forgiving small typos.
+
+    Handles Markdown fences, text around the object, extra characters
+    AFTER the object (a stray closing brace), and a missing final closing
+    brace after a closed list. It never invents content: an answer that
+    is cut off in the middle (including an open list) still fails.
+    """
+    text = raw.strip()
+
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    start = text.find("{")
+    candidate = text[start:] if start != -1 else text
+
+    decoder = json.JSONDecoder()
+
+    try:
+        return decoder.raw_decode(candidate)[0]
+    except json.JSONDecodeError as first_error:
+        # Only when the last list is properly CLOSED and just the final
+        # brace is missing. A list that was cut off open is never closed
+        # for the model: that could turn "still writing" into "no issues".
+        stripped = candidate.rstrip()
+
+        if stripped.endswith("]"):
+            try:
+                return decoder.raw_decode(stripped + "}")[0]
+            except json.JSONDecodeError:
+                pass
+
+        raise first_error
+
+
 def get_structured_completion(
     system_prompt: str,
     user_prompt: str,
@@ -357,9 +393,7 @@ def get_structured_completion(
         )
 
         try:
-            return schema.model_validate(
-                json.loads(_extract_json(response))
-            )
+            return schema.model_validate(parse_json_object(response))
         except (json.JSONDecodeError, ValidationError) as exc:
             last_error = exc
             logger.warning(

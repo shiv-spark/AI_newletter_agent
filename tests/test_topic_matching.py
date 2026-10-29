@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import text
 
 from app.database.db import engine
-from app.services.newsletter_service import build_topic_pattern
+from app.services.topic_matching import build_topic_pattern
 
 
 def matches(topic: str, value: str) -> bool:

@@ -16,6 +16,7 @@ import logging
 import re
 
 from app.agents.llm_client import get_structured_completion
+from app.config import settings
 from app.agents.schemas import (
     AnalystOutput,
     EditorIssue,
@@ -36,6 +37,9 @@ WRITE_SYSTEM_PROMPT = """
 You are the Writer of a professional news newsletter.
 Write the newsletter from the analysis and the source text provided.
 Return a subject line and, for every story:
+- subject: a SHORT newsletter title of at most {MAX_TITLE_WORDS} words and
+  {MAX_TITLE_CHARS} characters, for example "AI Chips, Fibre Networks and
+  Data Centre Law". Name the main themes; never list every story.
 - headline: clear, accurate, and faithful to the source article
 - what_happened: EXACTLY two sentences
 - why_it_matters: the significance, based on the analysis
@@ -83,8 +87,9 @@ Markdown fences or extra text:
 SUBJECT_SYSTEM_PROMPT = """
 You are the Writer of a professional news newsletter.
 The Editor-in-Chief rejected the subject line. Write a new one that
-fixes every listed problem. It must be short, relevant to the stories
-and must not exaggerate. Write in the requested language.
+fixes every listed problem. It must be short (at most {MAX_TITLE_WORDS}
+words and {MAX_TITLE_CHARS} characters), relevant to the stories and
+must not exaggerate. Write in the requested language.
 Return ONLY one valid JSON object: {"subject": "..."}
 """
 
@@ -233,6 +238,67 @@ def _clean_story(
 # Public functions
 # ---------------------------------------------------------------------------
 
+MAX_TITLE_WORDS = 8
+
+# Words that look wrong at the end of a shortened title.
+_DANGLING = {
+    "a", "an", "the", "and", "or", "of", "to", "in", "on", "at", "for",
+    "by", "with", "amid", "across", "as", "from", "into", "over",
+}
+_SEPARATORS = (":", " - ", " – ", " — ", "|", ";", ",")
+
+
+def _fill_title_limits(prompt: str) -> str:
+    return prompt.replace("{MAX_TITLE_WORDS}", str(MAX_TITLE_WORDS)).replace(
+        "{MAX_TITLE_CHARS}", str(settings.newsletter_title_max_chars)
+    )
+
+
+def _subject_violation(subject: str) -> str | None:
+    limit = settings.newsletter_title_max_chars
+    length = len(" ".join((subject or "").split()))
+
+    if length > limit:
+        return (
+            f"The subject has {length} characters; it must be a short title "
+            f"of at most {MAX_TITLE_WORDS} words and {limit} characters."
+        )
+
+    return None
+
+
+def shorten_subject(subject: str, limit: int | None = None) -> str:
+    """Cut a too-long title at a natural break, never in the middle of a word.
+
+    Used only when the AI ignored the length rule even after a repair.
+    """
+    limit = limit or settings.newsletter_title_max_chars
+    subject = " ".join((subject or "").split())
+
+    if len(subject) <= limit:
+        return subject
+
+    # Prefer the text before the last separator that still fits.
+    best = ""
+
+    for separator in _SEPARATORS:
+        position = subject.rfind(separator, 0, limit + 1)
+
+        if position >= 15 and position > len(best):
+            best = subject[:position]
+
+    if not best:
+        best = subject[: limit + 1]
+        best = best[: best.rfind(" ")] if " " in best else best[:limit]
+
+    words = best.rstrip(" ,;:-–—|").split()
+
+    while len(words) > 1 and words[-1].lower().strip(",;:") in _DANGLING:
+        words.pop()
+
+    return " ".join(words).rstrip(" ,;:-–—|") or subject[:limit]
+
+
 def write_newsletter(
     stories: list[dict],
     analysis: AnalystOutput,
@@ -282,7 +348,7 @@ def write_newsletter(
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         output = get_structured_completion(
-            WRITE_SYSTEM_PROMPT,
+            _fill_title_limits(WRITE_SYSTEM_PROMPT),
             prompt,
             WriterOutput,
             max_tokens=4000,
@@ -301,6 +367,11 @@ def write_newsletter(
             for index in sorted(by_index)
             for problem in _story_violations(by_index[index])
         ]
+
+        subject_problem = _subject_violation(output.subject)
+
+        if subject_problem:
+            problems.append(subject_problem)
 
         last_output = (output.subject, by_index)
 
@@ -340,7 +411,7 @@ def write_newsletter(
         for index, story in enumerate(stories)
     ]
 
-    return WriterOutput(subject=subject.strip(), stories=written)
+    return WriterOutput(subject=shorten_subject(subject), stories=written)
 
 
 def revise_story(
@@ -433,10 +504,10 @@ def revise_subject(
     )
 
     result = get_structured_completion(
-        SUBJECT_SYSTEM_PROMPT,
+        _fill_title_limits(SUBJECT_SYSTEM_PROMPT),
         prompt,
         SubjectRevision,
         max_tokens=200,
     )
 
-    return result.subject.strip()
+    return shorten_subject(result.subject)

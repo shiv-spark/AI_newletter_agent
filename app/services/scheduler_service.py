@@ -1,9 +1,7 @@
 import logging
-from collections import Counter
 from datetime import datetime, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 
 from app.config import settings
@@ -12,47 +10,11 @@ from app.database.models import User
 from app.services.delivery_service import send_newsletter
 from app.services.editorial_service import generate_editorial_issue
 from app.services.user_research import run_user_research
+from app.celery_app import celery_app
+
+
 
 logger = logging.getLogger(__name__)
-
-scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
-
-
-def scheduled_newsletter_check() -> None:
-    """Inspect active users and their newsletter frequencies safely."""
-    session = SessionLocal()
-
-    try:
-        statement = select(User).where(User.is_active.is_(True))
-        active_users = session.scalars(statement).all()
-
-        frequency_counts = Counter(
-            user.frequency for user in active_users
-        )
-
-        logger.info(
-            "Newsletter schedule check completed. "
-            "Active users: %s, daily: %s, weekly: %s, "
-            "other frequencies: %s. "
-            "Safe mode is active; no newsletter was generated or sent.",
-            len(active_users),
-            frequency_counts.get("daily", 0),
-            frequency_counts.get("weekly", 0),
-            {
-                frequency: count
-                for frequency, count in frequency_counts.items()
-                if frequency not in ("daily", "weekly")
-            },
-        )
-
-    except Exception:
-        logger.exception(
-            "Newsletter schedule check failed. "
-            "No newsletter was generated or sent."
-        )
-
-    finally:
-        session.close()
 
 
 def get_local_now(user, now: datetime | None = None) -> datetime:
@@ -93,6 +55,12 @@ def run_newsletter_for_user(user_id: int, send_emails: bool) -> str:
     issue = generate_editorial_issue(user_id)
 
     if issue["status"] != "approved":
+        logger.warning(
+            "Newsletter for user %s stopped with status %s. Reason: %s",
+            user_id,
+            issue["status"],
+            issue.get("error") or issue.get("note") or issue.get("found") or "n/a",
+        )
         return issue["status"]
 
     if not send_emails:
@@ -101,10 +69,44 @@ def run_newsletter_for_user(user_id: int, send_emails: bool) -> str:
     return send_newsletter(issue["issue_id"])["status"]
 
 
+
+# 1. Individual newsletter job (runs across Celery workers)
+@celery_app.task(name="generate_newsletter_task")
+def run_newsletter_for_user_task(user_id: int, send_emails: bool):
+    logger.info(
+        "Starting newsletter pipeline for user %s (send_emails=%s)...",
+        user_id,
+        send_emails,
+    )
+    try:
+        status = run_newsletter_for_user(user_id, send_emails)
+        logger.info("Newsletter pipeline finished for user %s: %s", user_id, status)
+
+        expected = "sent" if send_emails else "approved"
+        if status not in (expected, "sent"):
+            logger.warning(
+                "Newsletter for user %s was NOT delivered. Result: %s",
+                user_id,
+                status,
+            )
+        elif not send_emails:
+            logger.warning(
+                "Newsletter for user %s was approved but NOT emailed, because "
+                "SCHEDULER_SEND_ENABLED is false in .env.",
+                user_id,
+            )
+
+        return status
+    except Exception:
+        logger.exception("Newsletter run failed for user %s", user_id)
+        raise
+
+
+# 2. Celery Beat periodic dispatcher
+@celery_app.task(name="app.services.scheduler_service.scheduled_newsletter_run")
 def scheduled_newsletter_run() -> None:
-    """Find users who are due and run the newsletter pipeline for them."""
+    """Find users who are due and push them as tasks to Celery."""
     now = datetime.now(dt_timezone.utc)
-    due_user_ids = []
 
     with SessionLocal() as session:
         users = session.scalars(
@@ -112,67 +114,23 @@ def scheduled_newsletter_run() -> None:
         ).all()
 
         for user in users:
+            user_id = user.id
+
             try:
-                if is_user_due(user, now):
-                    # Mark first, so a crash cannot repeat the run every minute.
-                    user.last_run_date = get_local_now(user, now).date()
-                    due_user_ids.append(user.id)
-            except Exception:
-                logger.exception(
-                    "Could not check the schedule for user %s", user.id
+                if not is_user_due(user, now):
+                    continue
+
+                logger.info("User %s is due for scheduled newsletter run.", user_id)
+
+                # Dispatch first. The user is marked as done for today only
+                # after the task was queued, so a Redis or worker problem
+                # does not lock the user out until tomorrow.
+                run_newsletter_for_user_task.delay(
+                    user_id, settings.scheduler_send_enabled
                 )
 
-        session.commit()
-
-    for user_id in due_user_ids:
-        try:
-            status = run_newsletter_for_user(
-                user_id, settings.scheduler_send_enabled
-            )
-            logger.info("Newsletter run for user %s: %s", user_id, status)
-        except Exception:
-            logger.exception("Newsletter run failed for user %s", user_id)
-
-
-def start_scheduler() -> None:
-    """Start the scheduler once. The automatic run is off unless enabled."""
-    if scheduler.running:
-        logger.info("Newsletter scheduler is already running.")
-        return
-
-    scheduler.add_job(
-        scheduled_newsletter_check,
-        trigger="interval",
-        minutes=1,
-        id="newsletter_safe_check",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-    if settings.scheduler_enabled:
-        scheduler.add_job(
-            scheduled_newsletter_run,
-            trigger="interval",
-            minutes=1,
-            id="newsletter_auto_run",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-        logger.info(
-            "Automatic newsletter run is ON. Emails will be sent: %s",
-            settings.scheduler_send_enabled,
-        )
-    else:
-        logger.info("Automatic newsletter run is OFF.")
-
-    scheduler.start()
-    logger.info("Newsletter scheduler started.")
-
-
-def stop_scheduler() -> None:
-    """Stop the scheduler if it is running."""
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
-        logger.info("Newsletter scheduler stopped.")
+                user.last_run_date = get_local_now(user, now).date()
+                session.commit()
+            except Exception:
+                session.rollback()
+                logger.exception("Could not schedule newsletter for user %s", user_id)

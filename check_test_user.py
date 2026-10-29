@@ -3,12 +3,40 @@
 Run from the project folder:
     python check_test_user.py you@example.com
 """
+import json
 import sys
 
 from sqlalchemy import select
 
 from app.database.db import SessionLocal
 from app.database.models import NewsletterIssue, User
+
+
+def print_editor_feedback(raw: str | None) -> None:
+    """Show why the Editor rejected or corrected the newsletter."""
+    if not raw:
+        return
+
+    try:
+        feedback = json.loads(raw)
+    except ValueError:
+        print("Editor feedback (unreadable):", raw)
+        return
+
+    print("-" * 60)
+    print(f"Editor note: {feedback.get('note') or '-'}")
+
+    for number, verdict in enumerate(feedback.get("history", []), start=1):
+        print(f"Editor round {number}: {verdict.get('status')}")
+
+        for item in verdict.get("issues", []):
+            target = (
+                "SUBJECT/GENERAL"
+                if item.get("article_id") is None
+                else f"story {item['article_id']}"
+            )
+            print(f"   - [{target}] {item.get('problem')}")
+            print(f"       fix: {item.get('correction')}")
 
 
 def main() -> None:
@@ -42,6 +70,7 @@ def main() -> None:
         print(f"Subject: {issue.subject}")
         print(f"HTML version: {'yes' if issue.html_body else 'no'}")
         print(f"Corrections by the writer: {issue.revision_count}")
+        print_editor_feedback(issue.editor_feedback)
         print("-" * 60)
         print(issue.body)
 
