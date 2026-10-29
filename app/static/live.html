@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#083a2d">
+<title>__TITLE__</title>
+<style>
+/* Live web view of a newsletter.
+   Background layers adapted from the NeuraMind "living background":
+     1. <canvas id="net">  particle network (JS)
+     2. svg.motif          face profile with neural branches
+     3. body gradients + .vignette + .grain
+   The newsletter itself is the email HTML inside a sandboxed frame. */
+:root{--bg-0:#03150f;--bg-1:#083a2d;--ink:#eef7f2;--ink-dim:rgba(238,247,242,.64)}
+*{margin:0;padding:0;box-sizing:border-box}
+html{height:100%}
+body{
+  min-height:100%;color:var(--ink);overflow-x:hidden;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:
+    radial-gradient(1100px 720px at 76% 40%,rgba(18,92,69,.50),transparent 62%),
+    radial-gradient(880px 620px at 10% 92%,rgba(11,66,49,.45),transparent 60%),
+    linear-gradient(158deg,#0b4634 0%,var(--bg-1) 44%,var(--bg-0) 100%);
+  background-attachment:fixed;
+}
+#net{position:fixed;inset:0;z-index:1;pointer-events:none}
+.motif-wrap{
+  position:fixed;top:50%;right:3vw;height:min(88vh,800px);aspect-ratio:1/1;
+  transform:translateY(-50%);z-index:2;pointer-events:none;
+  animation:motifIn 1.8s ease both .1s;
+}
+@keyframes motifIn{from{opacity:0}to{opacity:1}}
+.motif{width:100%;height:100%;display:block;overflow:visible}
+.motif-glow{position:absolute;inset:-12%;
+  background:radial-gradient(closest-side at 48% 45%,rgba(255,255,255,.055),transparent 70%);z-index:-1}
+.b{fill:none;stroke:rgba(255,255,255,.42);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:1;stroke-dashoffset:1;animation:draw 1.1s cubic-bezier(.65,0,.35,1) forwards var(--d,0s)}
+@keyframes draw{to{stroke-dashoffset:0}}
+.d{fill:#fff;opacity:0;transform-box:fill-box;transform-origin:center;
+  animation:nodeIn .6s cubic-bezier(.2,.9,.3,1.4) forwards var(--d,1s),pulse 3.6s ease-in-out infinite calc(var(--d,1s) + .6s)}
+.halo{fill:rgba(255,255,255,.11);opacity:0;transform-box:fill-box;transform-origin:center;
+  animation:nodeIn .9s ease forwards var(--d,1s),pulse 3.6s ease-in-out infinite calc(var(--d,1s) + .9s)}
+@keyframes nodeIn{from{opacity:0;transform:scale(.3)}to{opacity:1;transform:scale(1)}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.28)}}
+.head{fill:url(#faceFill);stroke:rgba(255,255,255,.32);stroke-width:2;stroke-linejoin:round}
+.vignette{position:fixed;inset:0;z-index:4;pointer-events:none;
+  background:radial-gradient(125% 95% at 50% 42%,transparent 55%,rgba(2,14,10,.52) 100%)}
+.grain{position:fixed;inset:0;z-index:5;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)'/></svg>")}
+
+/* the newsletter card */
+.stage{position:relative;z-index:10;min-height:100svh;display:flex;justify-content:center;
+  padding:28px 16px 40px}
+@media (min-width:1100px){.stage{justify-content:flex-start;padding-left:8vw}}
+.card{width:min(640px,100%);align-self:flex-start;
+  animation:up .85s cubic-bezier(.2,.7,.3,1) both .2s}
+@keyframes up{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+iframe{display:block;width:100%;height:600px;border:1px solid rgba(255,255,255,.14);border-radius:14px;
+  background:transparent;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.note{margin-top:12px;text-align:center;font-size:12px;letter-spacing:.04em;color:rgba(238,247,242,.38)}
+
+/* wide screens: the face sits to the right of the card, clear of the text */
+@media (min-width:1100px){.motif-wrap{right:0;height:min(80vh,740px)}}
+/* narrower screens: the face moves behind the card, faint */
+@media (max-width:1099px){.motif-wrap{right:-34vw;top:57%;height:66vh;opacity:.22}}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .b{stroke-dasharray:none;stroke-dashoffset:0}
+  .d,.halo,.card,.motif-wrap{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="net" aria-hidden="true"></canvas>
+
+<div class="motif-wrap" aria-hidden="true">
+  <div class="motif-glow"></div>
+  <svg class="motif" viewBox="0 0 560 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="faceFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffffff" stop-opacity=".17"/>
+        <stop offset=".55" stop-color="#ffffff" stop-opacity=".07"/>
+        <stop offset="1" stop-color="#ffffff" stop-opacity=".02"/>
+      </linearGradient>
+      <linearGradient id="fadeBottom" x1="0" y1="0" x2="0" y2="1">
+        <stop offset=".8" stop-color="#ffffff"/>
+        <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+      </linearGradient>
+      <mask id="neckFade"><rect x="0" y="0" width="560" height="560" fill="url(#fadeBottom)"/></mask>
+    </defs>
+    <path class="b" style="--d:.25s" pathLength="1" d="M256 32 L210 12 L96 12"/>
+    <path class="b" style="--d:.5s" pathLength="1" d="M140 118 L24 118"/>
+    <path class="b" style="--d:.75s" pathLength="1" d="M140 118 L78 62"/>
+    <path class="b" style="--d:.7s" pathLength="1" d="M95 212 L12 212"/>
+    <path class="b" style="--d:.95s" pathLength="1" d="M112 318 L96 352 L20 352"/>
+    <path class="b" style="--d:1.1s" pathLength="1" d="M128 354 L70 398"/>
+    <path class="b" style="--d:1.2s" pathLength="1" d="M348 34 L390 12"/>
+    <circle class="halo" style="--d:1.35s" cx="96" cy="12" r="13"/>
+    <circle class="halo" style="--d:1.45s" cx="24" cy="118" r="16"/>
+    <circle class="halo" style="--d:1.55s" cx="12" cy="212" r="18"/>
+    <circle class="halo" style="--d:1.75s" cx="20" cy="352" r="14"/>
+    <circle class="d" style="--d:.5s" cx="256" cy="32" r="2.6"/>
+    <circle class="d" style="--d:.6s" cx="140" cy="118" r="3.2"/>
+    <circle class="d" style="--d:.85s" cx="95" cy="212" r="2.8"/>
+    <circle class="d" style="--d:1.1s" cx="112" cy="318" r="2.6"/>
+    <circle class="d" style="--d:1.15s" cx="128" cy="354" r="2.4"/>
+    <circle class="d" style="--d:1.25s" cx="348" cy="34" r="2.4"/>
+    <circle class="d" style="--d:.95s" cx="210" cy="12" r="2.4"/>
+    <circle class="d" style="--d:1.1s" cx="96" cy="352" r="2.4"/>
+    <circle class="d" style="--d:1.05s" cx="96" cy="12" r="5"/>
+    <circle class="d" style="--d:1.3s" cx="78" cy="62" r="4"/>
+    <circle class="d" style="--d:1.35s" cx="24" cy="118" r="6"/>
+    <circle class="d" style="--d:1.5s" cx="12" cy="212" r="7"/>
+    <circle class="d" style="--d:1.7s" cx="20" cy="352" r="5"/>
+    <circle class="d" style="--d:1.6s" cx="70" cy="398" r="4"/>
+    <circle class="d" style="--d:1.6s" cx="390" cy="12" r="4"/>
+    <circle class="d" style="--d:1.4s" cx="58" cy="44" r="3"/>
+    <circle class="d" style="--d:1.5s" cx="28" cy="152" r="2.4"/>
+    <circle class="d" style="--d:1.6s" cx="66" cy="268" r="2.8"/>
+    <circle class="d" style="--d:1.7s" cx="46" cy="442" r="2.4"/>
+    <circle class="d" style="--d:1.5s" cx="444" cy="66" r="2.6"/>
+    <g mask="url(#neckFade)">
+      <path class="head" d="M 252 28 C 320 22, 376 62, 386 128 C 389 148, 383 160, 384 172 C 396 184, 414 198, 416 210 C 414 220, 396 220, 390 226 C 398 234, 400 242, 390 246 C 398 252, 399 262, 388 266 C 398 276, 394 292, 374 298 C 350 308, 322 310, 300 320 C 284 328, 279 344, 278 364 L 274 560 L 168 560 C 176 500, 172 452, 164 410 C 150 380, 130 354, 114 316 C 96 276, 94 206, 118 144 C 140 82, 192 34, 252 28 Z"/>
+    </g>
+  </svg>
+</div>
+
+<div class="vignette" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<main class="stage">
+  <div class="card">
+    <iframe id="mail" title="Newsletter"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      srcdoc="__DOC__"></iframe>
+    <p class="note">Live view</p>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---- fit the frame to the newsletter so the page scrolls, not the frame ---- */
+  var mail = document.getElementById('mail');
+  function fit() {
+    try {
+      var d = mail.contentDocument;
+      if (!d || !d.documentElement) return;
+      mail.style.height = '0px';
+      mail.style.height = (d.documentElement.scrollHeight + 2) + 'px';
+    } catch (e) {}
+  }
+  mail.addEventListener('load', function () {
+    fit();
+    try { new ResizeObserver(fit).observe(mail.contentDocument.documentElement); } catch (e) {}
+  });
+  addEventListener('resize', fit);
+
+  /* ---- living particle network ---- */
+  var canvas = document.getElementById('net');
+  var ctx = canvas.getContext('2d');
+  var motif = document.querySelector('.motif');
+  var reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var W = 0, H = 0, DPR = 1;
+  var nodes = [];
+  var LINK_DIST = 132;
+  var MOUSE = { x: -1e4, y: -1e4, on: false };
+  var parallax = { x: 0, y: 0, tx: 0, ty: 0 };
+  var rand = function (a, b) { return a + Math.random() * (b - a); };
+
+  function spawnNode() {
+    return {
+      x: rand(0, W), y: rand(0, H),
+      vx: rand(-.16, .16) * DPR, vy: rand(-.16, .16) * DPR,
+      r: rand(.8, 2.4) * DPR, base: rand(.22, .6),
+      tw: rand(0, Math.PI * 2), ts: rand(.006, .02)
+    };
+  }
+
+  function resize() {
+    DPR = Math.min(devicePixelRatio || 1, 2);
+    W = canvas.width = innerWidth * DPR;
+    H = canvas.height = innerHeight * DPR;
+    canvas.style.width = innerWidth + 'px';
+    canvas.style.height = innerHeight + 'px';
+    var target = Math.max(40, Math.min(120, Math.round(innerWidth * innerHeight / 16000)));
+    while (nodes.length < target) nodes.push(spawnNode());
+    nodes.length = target;
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  addEventListener('pointermove', function (e) {
+    MOUSE.x = e.clientX * DPR; MOUSE.y = e.clientY * DPR; MOUSE.on = true;
+    parallax.tx = e.clientX / innerWidth - .5;
+    parallax.ty = e.clientY / innerHeight - .5;
+  });
+  document.addEventListener('mouseleave', function () { MOUSE.on = false; });
+  addEventListener('blur', function () { MOUSE.on = false; });
+
+  function frame() {
+    ctx.clearRect(0, 0, W, H);
+    var i, j, n, a, b, dx, dy, d2, t;
+
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      n.x += n.vx; n.y += n.vy; n.tw += n.ts;
+      if (MOUSE.on) {
+        dx = MOUSE.x - n.x; dy = MOUSE.y - n.y; d2 = dx * dx + dy * dy;
+        var R0 = 180 * DPR;
+        if (d2 < R0 * R0 && d2 > 40) { n.vx += dx * 2e-6; n.vy += dy * 2e-6; }
+      }
+      var sp = Math.hypot(n.vx, n.vy), max = .28 * DPR;
+      if (sp > max) { n.vx = n.vx / sp * max; n.vy = n.vy / sp * max; }
+      if (n.x < -24) n.x = W + 24; else if (n.x > W + 24) n.x = -24;
+      if (n.y < -24) n.y = H + 24; else if (n.y > H + 24) n.y = -24;
+    }
+
+    var maxD = LINK_DIST * DPR, maxD2 = maxD * maxD;
+    ctx.lineWidth = Math.max(.6, .9 * DPR);
+    for (i = 0; i < nodes.length; i++) {
+      a = nodes[i];
+      for (j = i + 1; j < nodes.length; j++) {
+        b = nodes[j];
+        dx = a.x - b.x; dy = a.y - b.y; d2 = dx * dx + dy * dy;
+        if (d2 < maxD2) {
+          t = 1 - Math.sqrt(d2) / maxD;
+          ctx.strokeStyle = 'rgba(210,250,230,' + (t * .17).toFixed(3) + ')';
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+      }
+    }
+
+    if (MOUSE.on) {
+      var R = 170 * DPR;
+      for (i = 0; i < nodes.length; i++) {
+        n = nodes[i];
+        dx = MOUSE.x - n.x; dy = MOUSE.y - n.y; d2 = dx * dx + dy * dy;
+        if (d2 < R * R) {
+          t = 1 - Math.sqrt(d2) / R;
+          ctx.strokeStyle = 'rgba(160,255,210,' + (t * .22).toFixed(3) + ')';
+          ctx.beginPath(); ctx.moveTo(MOUSE.x, MOUSE.y); ctx.lineTo(n.x, n.y); ctx.stroke();
+        }
+      }
+    }
+
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      var al = n.base * (.72 + .28 * Math.sin(n.tw));
+      ctx.fillStyle = 'rgba(238,255,248,' + al.toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 6.2832); ctx.fill();
+    }
+
+    parallax.x += (parallax.tx - parallax.x) * .045;
+    parallax.y += (parallax.ty - parallax.y) * .045;
+    motif.style.transform = 'translate3d(' + (parallax.x * -16).toFixed(2) + 'px,' +
+                            (parallax.y * -10).toFixed(2) + 'px,0)';
+
+    if (!reduceMotion) requestAnimationFrame(frame);
+  }
+
+  if (reduceMotion) frame(); else requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

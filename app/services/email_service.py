@@ -1,13 +1,24 @@
 import requests
 
 from app.config import settings
+from app.services.branding import branded_subject, sender_address
 
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
 
-def send_email(to_email: str, subject: str, body: str) -> dict:
-    """Send a plain-text email through Resend."""
+def send_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    html: str | None = None,
+) -> dict:
+    """Send an email through Resend.
+
+    `body` is always sent as the plain-text part. When `html` is given it
+    is sent as the HTML part, and mail clients that cannot show HTML fall
+    back to the plain text.
+    """
 
     if not settings.resend_api_key:
         raise ValueError("RESEND_API_KEY is not configured.")
@@ -30,11 +41,14 @@ def send_email(to_email: str, subject: str, body: str) -> dict:
     }
 
     payload = {
-        "from": settings.resend_from_email,
+        "from": sender_address(settings.resend_from_email),
         "to": [to_email.strip()],
-        "subject": subject.strip(),
+        "subject": branded_subject(subject),
         "text": body,
     }
+
+    if html and html.strip():
+        payload["html"] = html
 
     try:
         response = requests.post(
@@ -52,7 +66,10 @@ def send_email(to_email: str, subject: str, body: str) -> dict:
     if not response.ok:
         return {
             "success": False,
-            "error": f"Resend API returned HTTP {response.status_code}.",
+            "error": (
+                f"Resend API returned HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            ),
         }
 
     try:

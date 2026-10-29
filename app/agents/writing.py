@@ -1,7 +1,12 @@
-
 import json
+import logging
+import re
+
+import requests
 
 from app.agents.llm_client import get_chat_completion
+
+logger = logging.getLogger(__name__)
 
 
 def rank_articles(
@@ -24,7 +29,7 @@ def rank_articles(
             "title": article.get("title", ""),
             "source": article.get("source_name", ""),
             "summary": article.get("summary", ""),
-            "content_excerpt": content[:2000],
+            "content_excerpt": content[:500],
         })
 
     system_prompt = """
@@ -89,36 +94,45 @@ Do not include Markdown fences or extra text.
             response = get_chat_completion(
                 system_prompt,
                 prompt,
-                max_tokens=800 if attempt == 0 else 1200,
+                max_tokens=2500 if attempt == 0 else 4000,
             )
 
             selected_ids = parse_ranking_response(response)
 
             return [articles[index] for index in selected_ids]
 
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            if attempt == 0:
-                continue
-
-            raise ValueError(
-                "AI returned an invalid article-ranking response."
-            ) from exc
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+            requests.RequestException,
+        ) as exc:
+            # Try once more. After the second failure the loop ends and
+            # the keyword fallback below is used. A missing API key
+            # (RuntimeError) is not caught on purpose: it is a setup error.
+            logger.warning(
+                "AI ranking attempt %s failed for topic '%s': %s",
+                attempt + 1,
+                topic,
+                exc,
+            )
 
     # Fallback: rank only articles with a basic topic-term match.
-    topic_terms = set(topic.lower().split())
+    topic_terms = set(re.findall(r"\w+", topic.lower()))
 
     def relevance_score(article: dict) -> int:
         title = (article.get("title") or "").lower()
         summary = (article.get("summary") or "").lower()
         content = (article.get("content") or "").lower()
 
-        title_terms = set(title.split())
-        summary_terms = set(summary.split())
+        title_terms = set(re.findall(r"\w+", title))
+        summary_terms = set(re.findall(r"\w+", summary))
 
         score = 4 * len(topic_terms & title_terms)
         score += 2 * len(topic_terms & summary_terms)
 
-        if content and any(term in content for term in topic_terms):
+        if topic_terms & set(re.findall(r"\w+", content)):
             score += 1
 
         return score
@@ -344,10 +358,19 @@ def prepare_newsletter_content(
     for article in ranked_articles:
         item = article.copy()
 
-        item["ai_summary"] = summarize_article(
-            article=item,
-            language=language,
-        )
+        try:
+            item["ai_summary"] = summarize_article(
+                article=item,
+                language=language,
+            )
+        except (ValueError, requests.RequestException) as exc:
+            # One failed summary should not lose the whole newsletter.
+            logger.warning(
+                "Skipping article '%s' because summarizing failed: %s",
+                item.get("title"),
+                exc,
+            )
+            continue
 
         prepared.append(item)
 

@@ -60,3 +60,16 @@ def test_invalid_article_is_skipped():
 
     assert result["inserted"] == 0
     assert result["skipped_invalid"] == 1
+
+
+def test_article_content_is_saved():
+    article = make_article()
+    article["content"] = "Full article text. " * 20
+
+    save_articles([article])
+
+    with SessionLocal() as session:
+        saved = session.scalar(
+            select(Article).where(Article.url == article["url"])
+        )
+        assert saved.content == article["content"].strip()

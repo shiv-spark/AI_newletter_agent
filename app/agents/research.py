@@ -82,7 +82,6 @@ def extract_article_content(
     min_length: int = 300,
 ) -> dict:
     """Extract readable article text without modifying the database."""
-
     result = {
         "content": "",
         "final_url": article_url,

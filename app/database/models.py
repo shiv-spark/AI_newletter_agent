@@ -123,6 +123,25 @@ class NewsletterIssue(Base):
     status: Mapped[str] = mapped_column(
         String(30), default="draft", nullable=False
     )
+    # Rendered responsive HTML email. The plain-text version stays in `body`.
+    html_body: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    # Analyst Agent's cross-story summary ("The Big Picture").
+    big_picture: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    # Last Editor verdict stored as a JSON string (audit trail).
+    editor_feedback: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    # Number of Writer revisions that were needed for this issue.
+    revision_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
     sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

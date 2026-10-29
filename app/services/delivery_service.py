@@ -13,9 +13,14 @@ from app.services.email_service import send_email
 
 
 def send_newsletter(issue_id: int) -> dict:
-    """Send a saved draft and update its delivery status."""
+    """Send an approved issue and update its delivery status.
 
-    # Step 1: Validate and claim the draft atomically.
+    Only issues whose status is "approved" (passed the Editor-in-Chief
+    review) can be sent. Drafts, "needs_review" and "rejected" issues
+    are never emailed.
+    """
+
+    # Step 1: Validate and claim the approved issue atomically.
     with SessionLocal() as session:
         issue = session.get(NewsletterIssue, issue_id)
 
@@ -25,7 +30,7 @@ def send_newsletter(issue_id: int) -> dict:
                 "issue_id": issue_id,
             }
 
-        if issue.status != "draft":
+        if issue.status != "approved":
             return {
                 "status": "not_sendable",
                 "issue_id": issue_id,
@@ -83,12 +88,12 @@ def send_newsletter(issue_id: int) -> dict:
                 "article_ids": sorted(already_sent_ids),
             }
 
-        # Only one concurrent caller can claim this draft.
+        # Only one concurrent caller can claim this issue.
         claim = session.execute(
             update(NewsletterIssue)
             .where(
                 NewsletterIssue.id == issue_id,
-                NewsletterIssue.status == "draft",
+                NewsletterIssue.status == "approved",
             )
             .values(status="sending")
         )
@@ -105,6 +110,7 @@ def send_newsletter(issue_id: int) -> dict:
         recipient = user.email
         subject = issue.subject
         body = issue.body
+        html_body = issue.html_body
 
         session.commit()
 
@@ -114,6 +120,7 @@ def send_newsletter(issue_id: int) -> dict:
             to_email=recipient,
             subject=subject,
             body=body,
+            html=html_body,
         )
     except Exception:
         result = {
